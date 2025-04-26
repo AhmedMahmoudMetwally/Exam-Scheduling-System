@@ -1,1 +1,350 @@
+import os
+import pandas as pd
+import numpy as np
+import random
+from collections import defaultdict
+from deap import base, creator, tools, algorithms
+import matplotlib.pyplot as plt
+import seaborn as sns
+from tqdm import tqdm
+from datetime import datetime
+import warnings
 
+# Ignore seaborn warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+
+
+class ExamScheduler:
+    def __init__(self, data_folder):
+        self.data_folder = data_folder
+        self.load_data()
+        self.preprocess_data()
+        self.build_conflict_matrix()
+        self.setup_genetic_algorithm()
+
+    def load_data(self):
+        """Load all data files from the folder"""
+        try:
+            self.classrooms = pd.read_csv(os.path.join(self.data_folder, r"C:\Users\Pro\Downloads\classrooms.csv"))
+            self.courses = pd.read_csv(os.path.join(self.data_folder, r"C:\Users\Pro\Downloads\courses.csv"))
+            self.instructors = pd.read_csv(os.path.join(self.data_folder, r"C:\Users\Pro\Downloads\instructors.csv"))
+            self.schedule = pd.read_csv(os.path.join(self.data_folder, r"C:\Users\Pro\Downloads\schedule.csv"))
+            self.students = pd.read_csv(os.path.join(self.data_folder, r"C:\Users\Pro\Downloads\students.csv"))
+            self.timeslots = pd.read_csv(os.path.join(self.data_folder, r"C:\Users\Pro\Downloads\timeslots.csv"))
+
+            # Convert timeslot times
+            self.timeslots['start_time'] = pd.to_datetime(self.timeslots['start_time'], format='%H:%M').dt.time
+            self.timeslots['end_time'] = pd.to_datetime(self.timeslots['end_time'], format='%H:%M').dt.time
+
+        except Exception as e:
+            raise ValueError(f"Error loading data: {e}")
+
+    def preprocess_data(self):
+        """Preprocess the data"""
+        # Merge data to create comprehensive table
+        self.exam_data = self.schedule.merge(
+            self.courses, on='course_id'
+        ).merge(
+            self.students, on='student_id'
+        ).merge(
+            self.classrooms, on='classroom_id'
+        ).merge(
+            self.timeslots, on='timeslot_id'
+        ).merge(
+            self.instructors, on='instructor_id'
+        )
+
+        # Add useful columns
+        self.exam_data['exam_duration'] = pd.to_numeric(self.exam_data['credits']) * 30  # 30 minutes per credit hour
+
+        # Process student year if available
+        if 'year' in self.exam_data.columns:
+            year_mapping = {'Freshman': 1, 'Sophomore': 2, 'Junior': 3, 'Senior': 4}
+            self.exam_data['student_year'] = self.exam_data['year'].map(year_mapping)
+
+        # Classify courses by size
+        student_counts = self.exam_data.groupby('course_id')['student_id'].nunique()
+        self.exam_data['course_size'] = self.exam_data['course_id'].map(student_counts)
+        self.exam_data['course_type'] = np.where(
+            self.exam_data['course_size'] > 100, 'Large',
+            np.where(self.exam_data['course_size'] > 50, 'Medium', 'Small')
+        )
+
+    def build_conflict_matrix(self):
+        """Build course conflict matrix"""
+        self.unique_courses = self.exam_data['course_id'].unique()
+        self.n_courses = len(self.unique_courses)
+        self.course_to_idx = {course: idx for idx, course in enumerate(self.unique_courses)}
+
+        # Create conflict matrix
+        self.conflict_matrix = np.zeros((self.n_courses, self.n_courses), dtype=int)
+
+        # Calculate number of shared students between each course pair
+        student_courses = defaultdict(set)
+        for student, group in self.exam_data.groupby('student_id'):
+            student_courses[student] = set(group['course_id'])
+
+        for student, courses in student_courses.items():
+            courses_list = list(courses)
+            for i in range(len(courses_list)):
+                for j in range(i + 1, len(courses_list)):
+                    idx1 = self.course_to_idx[courses_list[i]]
+                    idx2 = self.course_to_idx[courses_list[j]]
+                    self.conflict_matrix[idx1][idx2] += 1
+                    self.conflict_matrix[idx2][idx1] += 1
+
+    def setup_genetic_algorithm(self):
+        """Initialize genetic algorithm"""
+        creator.create("FitnessMin", base.Fitness, weights=(-1.0, -0.5, -0.3, -0.2))
+        creator.create("Individual", list, fitness=creator.FitnessMin)
+
+        self.toolbox = base.Toolbox()
+
+        # Define individual creation function
+        def create_individual():
+            individual = []
+            all_rooms = self.classrooms['classroom_id'].tolist()
+            big_rooms = self.classrooms[self.classrooms['capacity'] >= 100]['classroom_id'].tolist()
+
+            for course_id in self.unique_courses:
+                course_data = self.exam_data[self.exam_data['course_id'] == course_id].iloc[0]
+
+                # Select appropriate classroom
+                if course_data['course_type'] == 'Large' and big_rooms:
+                    room = random.choice(big_rooms)
+                else:
+                    room = random.choice(all_rooms)
+
+                # Select timeslot
+                timeslot = random.choice(self.timeslots['timeslot_id'].tolist())
+
+                individual.append((room, timeslot))
+
+            return creator.Individual(individual)
+
+        self.toolbox.register("individual", tools.initIterate, creator.Individual, create_individual)
+        self.toolbox.register("population", tools.initRepeat, list, self.toolbox.individual)
+        self.toolbox.register("evaluate", self.evaluate_schedule)
+        self.toolbox.register("mate", self.custom_crossover)
+        self.toolbox.register("mutate", self.custom_mutation)
+        self.toolbox.register("select", tools.selNSGA2)
+
+    def custom_crossover(self, ind1, ind2):
+        """Custom crossover that maintains constraints"""
+        tools.cxTwoPoint(ind1, ind2)
+        return ind1, ind2
+
+    def custom_mutation(self, individual):
+        """Custom mutation"""
+        all_rooms = self.classrooms['classroom_id'].tolist()
+        big_rooms = self.classrooms[self.classrooms['capacity'] >= 100]['classroom_id'].tolist()
+        all_timeslots = self.timeslots['timeslot_id'].tolist()
+
+        for i in range(len(individual)):
+            if random.random() < 0.1:
+                course_id = self.unique_courses[i]
+                course_data = self.exam_data[self.exam_data['course_id'] == course_id].iloc[0]
+
+                # Change classroom
+                if course_data['course_type'] == 'Large' and big_rooms:
+                    new_room = random.choice(big_rooms)
+                else:
+                    new_room = random.choice(all_rooms)
+
+                # Change timeslot
+                new_timeslot = random.choice(all_timeslots)
+
+                individual[i] = (new_room, new_timeslot)
+
+        return individual,
+
+    def evaluate_schedule(self, individual):
+        """Evaluate schedule"""
+        conflicts = 0
+        schedule = defaultdict(list)
+
+        for i, (room, timeslot) in enumerate(individual):
+            schedule[(room, timeslot)].append(i)
+
+        # Calculate conflicts
+        for courses_in_slot in schedule.values():
+            for i in range(len(courses_in_slot)):
+                for j in range(i + 1, len(courses_in_slot)):
+                    conflicts += self.conflict_matrix[courses_in_slot[i]][courses_in_slot[j]]
+
+        # Classroom usage balance
+        room_usage = defaultdict(int)
+        for (room, _), courses in schedule.items():
+            room_usage[room] += len(courses)
+        room_balance = np.std(list(room_usage.values())) if room_usage else 0
+
+        # Large courses distribution
+        large_courses_penalty = 0
+        large_courses = self.exam_data[self.exam_data['course_type'] == 'Large']['course_id'].unique()
+        large_indices = [self.course_to_idx[course] for course in large_courses]
+
+        large_distribution = defaultdict(int)
+        for idx in large_indices:
+            _, timeslot = individual[idx]
+            large_distribution[timeslot] += 1
+
+        for count in large_distribution.values():
+            if count > 1:
+                large_courses_penalty += (count - 1) * 5
+
+        # Classroom capacity utilization
+        capacity_penalty = 0
+        for (room, timeslot), courses in schedule.items():
+            room_capacity = self.classrooms[self.classrooms['classroom_id'] == room]['capacity'].values[0]
+            total_students = sum(
+                self.exam_data[self.exam_data['course_id'] == self.unique_courses[i]]['student_id'].nunique()
+                for i in courses
+            )
+            if total_students > room_capacity:
+                capacity_penalty += (total_students - room_capacity) * 2
+
+        return conflicts, room_balance, large_courses_penalty, capacity_penalty
+
+    def optimize(self):
+        """Run optimization process"""
+        pop = self.toolbox.population(n=50)
+        hof = tools.HallOfFame(1)
+        stats = tools.Statistics(lambda ind: ind.fitness.values)
+        stats.register("avg", np.mean)
+        stats.register("min", np.min)
+        stats.register("max", np.max)
+
+        # Progress bar
+        pbar = tqdm(total=100, desc="Optimizing schedule")
+
+        # Run algorithm
+        algorithms.eaSimple(
+            pop, self.toolbox, cxpb=0.7, mutpb=0.2, ngen=100,
+            stats=stats, halloffame=hof, verbose=False
+        )
+
+        pbar.close()
+        return hof[0], stats
+
+    def generate_final_schedule(self, best_ind):
+        """Generate final schedule"""
+        schedule_df = pd.DataFrame({
+            'course_id': self.unique_courses,
+            'assigned_room': [room for room, _ in best_ind],
+            'assigned_timeslot': [timeslot for _, timeslot in best_ind]
+        })
+
+        # Merge data
+        final_schedule = schedule_df.merge(
+            self.courses, on='course_id'
+        ).merge(
+            self.timeslots, left_on='assigned_timeslot', right_on='timeslot_id'
+        ).merge(
+            self.classrooms, left_on='assigned_room', right_on='classroom_id'
+        )
+
+        # Add student counts
+        student_counts = self.exam_data.groupby('course_id')['student_id'].nunique()
+        final_schedule['num_students'] = final_schedule['course_id'].map(student_counts)
+
+        # Order columns
+        columns_order = [
+            'course_id', 'course_name', 'department', 'credits',
+            'day', 'start_time', 'end_time', 'building_name', 'room_number',
+            'capacity', 'num_students', 'room_type'
+        ]
+
+        available_columns = [col for col in columns_order if col in final_schedule.columns]
+        return final_schedule[available_columns].sort_values(['day', 'start_time'])
+
+    def visualize_results(self, final_schedule):
+        """Visualize results"""
+        plt.figure(figsize=(18, 12))
+
+        # Course distribution by day
+        plt.subplot(2, 2, 1)
+        if 'day' in final_schedule.columns:
+            day_counts = final_schedule['day'].value_counts().sort_index()
+            sns.barplot(x=day_counts.index, y=day_counts.values, color='skyblue')
+            plt.title("Course Distribution by Day")
+            plt.ylabel("Number of Courses")
+
+        # Classroom usage
+        plt.subplot(2, 2, 2)
+        if 'building_name' in final_schedule.columns:
+            room_usage = final_schedule.groupby('building_name').size().sort_values()
+            sns.barplot(x=room_usage.values, y=room_usage.index, color='salmon')
+            plt.title("Course Distribution by Building")
+            plt.xlabel("Number of Courses")
+
+        # Student distribution
+        plt.subplot(2, 2, 3)
+        if 'day' in final_schedule.columns and 'num_students' in final_schedule.columns:
+            student_dist = final_schedule.groupby('day')['num_students'].sum().sort_index()
+            sns.barplot(x=student_dist.index, y=student_dist.values, color='lightgreen')
+            plt.title("Student Distribution by Day")
+            plt.ylabel("Number of Students")
+
+        plt.tight_layout()
+        plt.show()
+
+    def display_schedule(self, final_schedule):
+        """Display schedule in console"""
+        print("\n" + "=" * 80)
+        print("Optimized Exam Schedule")
+        print("=" * 80)
+
+        display_cols = ['course_id', 'course_name', 'day', 'start_time', 'end_time',
+                        'building_name', 'room_number', 'num_students']
+        display_cols = [col for col in display_cols if col in final_schedule.columns]
+
+        if not final_schedule.empty:
+            print(final_schedule[display_cols].to_string(index=False))
+        else:
+            print("No data to display")
+
+    def run(self):
+        """Run the complete system"""
+        print("🚀 Starting exam schedule optimization...")
+        print(f"Number of courses: {len(self.unique_courses)}")
+        print(f"Number of students: {len(self.students)}")
+        print(f"Number of classrooms: {len(self.classrooms)}")
+        print(f"Number of timeslots: {len(self.timeslots)}")
+
+        # Check for large classrooms
+        big_rooms = self.classrooms[self.classrooms['capacity'] >= 100]
+        if len(big_rooms) == 0:
+            print("⚠️ Warning: No large classrooms (capacity ≥ 100) in data")
+
+        try:
+            best_ind, _ = self.optimize()
+            final_schedule = self.generate_final_schedule(best_ind)
+
+            print("\n✅ Optimization completed successfully!")
+            if hasattr(best_ind.fitness, 'values'):
+                print(f"Best schedule has {best_ind.fitness.values[0]:.0f} student conflicts")
+
+            # Display results
+            self.display_schedule(final_schedule)
+            self.visualize_results(final_schedule)
+
+            # Save results
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_file = f"optimized_schedule_{timestamp}.csv"
+            final_schedule.to_csv(output_file, index=False, encoding='utf-8-sig')
+
+            print(f"\n💾 Optimal schedule saved to: {output_file}")
+            return final_schedule
+
+        except Exception as e:
+            print(f"\n❌ Error during optimization: {e}")
+            return None
+
+
+if __name__ == "__main__":
+    try:
+        # Replace path with your data folder path
+        scheduler = ExamScheduler("university_data")
+        final_schedule = scheduler.run()
+    except Exception as e:
+        print(f"❌ System failed to run: {e}")
