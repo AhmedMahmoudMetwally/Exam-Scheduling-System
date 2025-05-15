@@ -305,7 +305,7 @@ class ExamScheduler:
 
     def run(self):
         """Run the complete system"""
-        print("🚀 Starting exam schedule optimization...")
+        print(" Starting exam schedule optimization...")
         print(f"Number of courses: {len(self.unique_courses)}")
         print(f"Number of students: {len(self.students)}")
         print(f"Number of classrooms: {len(self.classrooms)}")
@@ -333,7 +333,7 @@ class ExamScheduler:
             output_file = f"optimized_schedule_{timestamp}.csv"
             final_schedule.to_csv(output_file, index=False, encoding='utf-8-sig')
 
-            print(f"\n💾 Optimal schedule saved to: {output_file}")
+            print(f"\n Optimal schedule saved to: {output_file}")
             return final_schedule
 
         except Exception as e:
