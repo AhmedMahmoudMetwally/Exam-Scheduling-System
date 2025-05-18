@@ -10,7 +10,7 @@ distribute workload using genetic algorithms.
 # 1. The Dataset
 This dataset is designed for modeling and solving the exam scheduling problem in universities. It contains multiple types of information covering course details, students, instructors, classrooms, and exam timeslots. This enables analysis of exam conflicts and optimization of the final schedule using techniques such as genetic algorithms or other optimization methods.
 
-2. Dataset Contents
+# 2. Dataset Contents
 The dataset consists of several CSV files, including:
 
 courses.csv
