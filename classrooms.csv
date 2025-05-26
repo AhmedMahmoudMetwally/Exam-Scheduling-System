@@ -1,0 +1,31 @@
+classroom_id,building_name,room_number,capacity,room_type
+1,A,305,35,Lecture Hall
+2,K,144,24,Classroom
+3,B,710,46,Classroom
+4,A,541,30,Classroom
+5,I,747,35,Lecture Hall
+6,L,231,38,Lab
+7,F,502,43,Classroom
+8,B,267,41,Lecture Hall
+9,J,627,44,Lab
+10,G,834,42,Classroom
+11,G,203,24,Classroom
+12,E,524,29,Lecture Hall
+13,F,727,27,Classroom
+14,D,836,24,Lab
+15,E,663,40,Classroom
+16,K,793,46,Classroom
+17,C,403,37,Lab
+18,H,198,23,Lab
+19,E,460,36,Lab
+20,E,665,26,Lecture Hall
+21,C,660,24,Lab
+22,L,958,38,Lab
+23,A,600,21,Classroom
+24,E,860,30,Lecture Hall
+25,D,773,29,Lecture Hall
+26,L,933,22,Lab
+27,A,716,44,Lab
+28,E,707,25,Lab
+29,D,168,36,Lab
+30,F,735,45,Classroom
