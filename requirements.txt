@@ -9,3 +9,4 @@ WordCloud
 networkx 
 scipy
 statsmodels
+deap
