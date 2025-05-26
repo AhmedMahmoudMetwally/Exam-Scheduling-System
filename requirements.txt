@@ -1,0 +1,11 @@
+matplotlib
+streamlit
+scikit-learn
+pandas
+numpy
+streamlit
+seaborn
+WordCloud
+networkx 
+scipy
+statsmodels
