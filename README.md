@@ -1,12 +1,12 @@
  # Exam-Scheduling-system 
  
+ 
+ 
+ [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+
  Project in smart system 
 Optimize university exam schedules to reduce student conflicts and evenly 
 distribute workload using genetic algorithms.
-
-
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
 
 # Output:Optimized exam timetable with minimal student conflicts and even distribution of workload. 
